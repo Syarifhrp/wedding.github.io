@@ -1,12 +1,28 @@
+// Konfigurasi Firebase Anda
+const firebaseConfig = {
+  apiKey: "AIzaSyChiVbfK7r7kKThI8_7J9UHrkF9Dem4fLs",
+  authDomain: "weddingsyarif-91c40.firebaseapp.com",
+  databaseURL: "https://weddingsyarif-91c40-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "weddingsyarif-91c40",
+  storageBucket: "weddingsyarif-91c40.firebasestorage.app",
+  messagingSenderId: "84219121037",
+  appId: "1:84219121037:web:bcaca78320957a6cdf01c4",
+  measurementId: "G-TQD5LP9JJ9"
+};
+
+// Inisialisasi Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
 function showData(dataMessage) {
   let row = "";
 
   if (!dataMessage || dataMessage.length == 0) {
-    return (row = `<h1 class="title" style="text-align : center">Belum Ada Pesan Masuk</h1>`);
+    return `<h1 class="title" style="text-align : center">Belum Ada Pesan Masuk</h1>`;
   }
 
-  // PHP sudah meletakkan pesan paling baru di barisan Index 0.
-  dataMessage.forEach(function (item) {
+  // membalik urutan agar pesan terbaru di atas
+  dataMessage.reverse().forEach(function (item) {
     row += `<h1 class="title">${item["nama"]}</h1>`;
     let hub = item["hubungan"] || "Tamu";
     row += `<h4>- ${hub}</h4>`;
@@ -15,87 +31,65 @@ function showData(dataMessage) {
   return row;
 }
 
-// State sementara pesan-pesan
-let currentMessages = [];
-
-// Method AJAX GET -> layaknya Livewire poll method memmanggil function untuk me-refresh component
-function loadMessages() {
-  $.ajax({
-    url: "api_pesan.php",
-    type: "GET",
-    dataType: "json",
-    success: function(response) {
-      if (Array.isArray(response)) {
-        currentMessages = response;
-        $(".card-message").html(showData(currentMessages));
-      } else {
-        $(".card-message").html(showData([]));
-      }
-    },
-    error: function(err) {
-      // Abaikan console logging di production mode, atau tampil warning.
-      // console.error("Gagal memuat pesan dari server...", err);
-    }
-  });
-}
-
 $(function () {
-  // 1. Ambil data pesan dari File System/PHP saat user membuka halaman di div .card-message
-  loadMessages();
+  // 1. Baca data secara real-time dari Firebase menggunakan Listener .on("value")
+  // Event ini otomatis ter-trigger saat pertama diload dan setiap kali ada data baru!
+  db.ref("pesan").on("value", function(snapshot) {
+    let messages = [];
+    snapshot.forEach(function(childSnapshot) {
+      messages.push(childSnapshot.val());
+    });
+    $(".card-message").html(showData(messages));
+  });
 
-  // Livewire Wire:Poll Equivalent -> Secara otomatis check data ke PHP per-3 Detik 
-  // Jika pengguna di HP A mengisi form, pengguna HP B akan otomatis mendapatkan pesan itu 
-  // dalam hitungan maksimal 3 detik.
-  setInterval(loadMessages, 3000);
-
-  // 2. Event Handle form submit menggunakan jQuery Ajax POST -> wire:submit
+  // 2. Event Handle form submit
   $("#formMessage").on("submit", function (e) {
     e.preventDefault();
     
     let submitBtn = $(this).find('button[type="submit"]');
     let originalText = submitBtn.html();
     
-    // Memberikan state loading seperti wire:loading
+    // Memberikan state loading
     submitBtn.prop('disabled', true).text('Sending...');
 
-    $.ajax({
-        url: "api_pesan.php",
-        type: "POST",
-        data: $(this).serialize(), // Mengumpulkan value (nama, hubungan, pesan)
-        dataType: "json",
-        success: function(response) {
-            if (response.status === 'success') {
-                Swal.fire({
-                    position: "center",
-                    icon: "success",
-                    title: "Terima Kasih Atas Ucapan & Doanya ",
-                    showConfirmButton: false,
-                    timer: 2000,
-                });
-                
-                // reset textarea dan input tags
-                $("#formMessage")[0].reset();
-                
-                // Tarik data agar tampilan langsung update tanpa harus menunggu 3 detik (Instant UI Feedback)
-                loadMessages();
-            }
-        },
-        error: function(xhr) {
-            let res = xhr.responseJSON;
-            Swal.fire({
-                icon: 'error',
-                title: 'Gagal Mengirim',
-                text: (res && res.message) ? res.message : 'Terjadi kesalahan saat mengirim pesan via AJAX.'
-            });
-        },
-        complete: function() {
-            // Restore button text
-            submitBtn.prop('disabled', false).html(originalText);
-            // Re-render icon
-            if (typeof feather !== 'undefined') {
-                feather.replace(); 
-            }
-        }
+    // Ambil nilai dari form
+    let formData = $(this).serializeArray();
+    let dataObj = {};
+    $(formData).each(function(index, obj){
+        dataObj[obj.name] = obj.value;
     });
+
+    // Tambahkan timestamp server
+    dataObj.timestamp = firebase.database.ServerValue.TIMESTAMP;
+
+    // Push ke Realtime Database pada node "pesan"
+    db.ref("pesan").push(dataObj)
+      .then(() => {
+        Swal.fire({
+            position: "center",
+            icon: "success",
+            title: "Terima Kasih Atas Ucapan & Doanya ",
+            showConfirmButton: false,
+            timer: 2000,
+        });
+        
+        // reset form
+        $("#formMessage")[0].reset();
+      })
+      .catch((error) => {
+        Swal.fire({
+            icon: 'error',
+            title: 'Gagal Mengirim',
+            text: error.message || 'Terjadi kesalahan saat mengirim pesan via Firebase.'
+        });
+      })
+      .finally(() => {
+        // Restore button text
+        submitBtn.prop('disabled', false).html(originalText);
+        // Re-render icon
+        if (typeof feather !== 'undefined') {
+            feather.replace(); 
+        }
+      });
   });
 });
